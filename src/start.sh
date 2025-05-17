@@ -7,26 +7,6 @@ export LD_PRELOAD="${TCMALLOC}"
 set -eo pipefail
 set +u
 
-FILM_PATH="/ComfyUI/custom_nodes/ComfyUI-Frame-Interpolation/ckpts/film/film_net_fp32.pt"
-
-if [ ! -f "$FILM_PATH" ]; then
-    echo "⬇️ Downloading film_net_fp32.pt in background..."
-    mkdir -p "$(dirname "$FILM_PATH")"
-    wget -q https://d1s3da0dcaf6kx.cloudfront.net/film_net_fp32.pt -O "$FILM_PATH" &
-    FILM_PID=$!
-else
-    echo "✅ film_net_fp32.pt already exists."
-    FILM_PID=""
-fi
-
-echo "🔧 Installing KJNodes packages..."
-pip install -r /ComfyUI/custom_nodes/ComfyUI-KJNodes/requirements.txt &
-KJ_PID=$!
-
-echo "🔧 Installing WanVideoWrapper packages..."
-pip install -r /ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt &
-WAN_PID=$!
-
 if [[ -z "$is_multi_gpu" || "$is_multi_gpu" != "false" ]]; then
 if [[ "${IS_DEV,,}" =~ ^(true|1|t|yes)$ ]]; then
     API_URL="https://comfyui-job-api-dev.fly.dev"  # Replace with your development API URL
@@ -119,39 +99,13 @@ sync_bot_repo() {
 
 if [ -f "$FLAG_FILE" ] || [ "$new_config" = "true" ]; then
   echo "FLAG FILE FOUND"
-  pip install --no-cache-dir -r $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt
-  mv "/4xLSDIR.pth" "$NETWORK_VOLUME/ComfyUI/models/upscale_models" || echo "Move operation failed, continuing..."
   rm -rf "$NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-Manager" || echo "Remove operation failed, continuing..."
   sync_bot_repo
-
-  wait $KJ_PID
-  KJ_STATUS=$?
-
-  wait $WAN_PID
-  WAN_STATUS=$?
-  echo "✅ KJNodes install complete"
-  echo "✅ WanVideoWrapper install complete"
-
-  # Check results
-  if [ $KJ_STATUS -ne 0 ]; then
-    echo "❌ KJNodes install failed."
-    exit 1
-  fi
-
-  if [ $WAN_STATUS -ne 0 ]; then
-    echo "❌ WanVideoWrapper install failed."
-    exit 1
-  fi
-
-  if [ -n "$FILM_PID" ]; then
-    wait $FILM_PID
-    echo "✅ film_net_fp32.pt download complete."
-  fi
 
   echo "▶️  Starting ComfyUI"
   # group both the main and fallback commands so they share the same log
   mkdir -p "$NETWORK_VOLUME/${RUNPOD_POD_ID}"
-  nohup bash -c "python3 \"$NETWORK_VOLUME\"/ComfyUI/main.py --listen --use-sage-attention --extra-model-paths-config '/ComfyUI-Bot-Wan-Template/extra_model_paths.yaml' 2>&1 | tee \"$NETWORK_VOLUME\"/comfyui_\"$RUNPOD_POD_ID\"_nohup.log" &
+  nohup bash -c "python3 \"$NETWORK_VOLUME\"/ComfyUI/main.py --listen --use-sage-attention --extra-model-paths-config '/Discord-Bot-LTX/extra_model_paths.yaml' 2>&1 | tee \"$NETWORK_VOLUME\"/comfyui_\"$RUNPOD_POD_ID\"_nohup.log" &
 
   until curl --silent --fail "$URL" --output /dev/null; do
       echo "🔄  Still waiting…"
@@ -170,12 +124,6 @@ if [ -f "$FLAG_FILE" ] || [ "$new_config" = "true" ]; then
 else
   echo "NO FLAG FILE FOUND – starting initial setup"
 fi
-
-wait $KJ_PID
-KJ_STATUS=$?
-
-wait $WAN_PID
-WAN_STATUS=$?
 
 sync_bot_repo
 # Set the target directory
@@ -242,139 +190,11 @@ download_model() {
   fi
 }
 
-# Define base paths
-DIFFUSION_MODELS_DIR="$NETWORK_VOLUME/ComfyUI/models/diffusion_models"
-TEXT_ENCODERS_DIR="$NETWORK_VOLUME/ComfyUI/models/text_encoders"
-CLIP_VISION_DIR="$NETWORK_VOLUME/ComfyUI/models/clip_vision"
-VAE_DIR="$NETWORK_VOLUME/ComfyUI/models/vae"
-
-# Download 480p native models
-echo "Downloading 480p native models..."
-
-download_model "$DIFFUSION_MODELS_DIR" "wan2.1_i2v_480p_14B_bf16.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/diffusion_models/wan2.1_i2v_480p_14B_bf16.safetensors"
-
-download_model "$DIFFUSION_MODELS_DIR" "wan2.1_t2v_14B_bf16.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/diffusion_models/wan2.1_t2v_14B_bf16.safetensors"
-
-download_model "$DIFFUSION_MODELS_DIR" "wan2.1_t2v_1.3B_fp16.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/diffusion_models/wan2.1_t2v_1.3B_fp16.safetensors"
-
-# Download text encoders
-echo "Downloading text encoders..."
-
-download_model "$TEXT_ENCODERS_DIR" "umt5_xxl_fp8_e4m3fn_scaled.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"
-
-download_model "$TEXT_ENCODERS_DIR" "open-clip-xlm-roberta-large-vit-huge-14_visual_fp16.safetensors" \
-  "Kijai/WanVideo_comfy" "open-clip-xlm-roberta-large-vit-huge-14_visual_fp16.safetensors"
-
-# Create CLIP vision directory and download models
-mkdir -p "$CLIP_VISION_DIR"
-download_model "$CLIP_VISION_DIR" "clip_vision_h.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/clip_vision/clip_vision_h.safetensors"
-
-# Download VAE
-echo "Downloading VAE..."
-download_model "$VAE_DIR" "Wan2_1_VAE_bf16.safetensors" \
-  "Kijai/WanVideo_comfy" "Wan2_1_VAE_bf16.safetensors"
-
-download_model "$VAE_DIR" "wan_2.1_vae.safetensors" \
-  "Comfy-Org/Wan_2.1_ComfyUI_repackaged" "split_files/vae/wan_2.1_vae.safetensors"
-
-# Download upscale model
-echo "Downloading upscale models"
-mkdir -p "$NETWORK_VOLUME/ComfyUI/models/upscale_models"
-if [ ! -f "$NETWORK_VOLUME/ComfyUI/models/upscale_models/4xLSDIR.pth" ]; then
-    if [ -f "/4xLSDIR.pth" ]; then
-        mv "/4xLSDIR.pth" "$NETWORK_VOLUME/ComfyUI/models/upscale_models/4xLSDIR.pth"
-        echo "Moved 4xLSDIR.pth to the correct location."
-    else
-        echo "4xLSDIR.pth not found in the root directory."
-    fi
-else
-    echo "4xLSDIR.pth already exists. Skipping."
-fi
-
-# Download film network model
-echo "Downloading film network model"
-if [ ! -f "$NETWORK_VOLUME/ComfyUI/models/upscale_models/film_net_fp32.pt" ]; then
-    wget -O "$NETWORK_VOLUME/ComfyUI/models/upscale_models/film_net_fp32.pt" \
-    https://huggingface.co/nguu/film-pytorch/resolve/887b2c42bebcb323baf6c3b6d59304135699b575/film_net_fp32.pt
-fi
-
-echo "Finished downloading models!"
-
-
-
-declare -A MODEL_CATEGORY_FILES=(
-    ["$NETWORK_VOLUME/ComfyUI/models/checkpoints"]="$NETWORK_VOLUME/comfyui-discord-bot-dev/downloads/checkpoint_to_download.txt"
-    ["$NETWORK_VOLUME/ComfyUI/models/loras"]="$NETWORK_VOLUME/comfyui-discord-bot-dev/downloads/video_lora_to_download.txt"
-)
-
-# Ensure directories exist and download models
-for TARGET_DIR in "${!MODEL_CATEGORY_FILES[@]}"; do
-    CONFIG_FILE="${MODEL_CATEGORY_FILES[$TARGET_DIR]}"
-
-    # Skip if the file doesn't exist
-    if [ ! -f "$CONFIG_FILE" ]; then
-        echo "Skipping downloads for $TARGET_DIR (file $CONFIG_FILE not found)"
-        continue
-    fi
-
-    # Read comma-separated model IDs from the file
-    MODEL_IDS_STRING=$(cat "$CONFIG_FILE")
-
-    # Skip if the file is empty or contains placeholder text
-    if [ -z "$MODEL_IDS_STRING" ] || [ "$MODEL_IDS_STRING" == "replace_with_ids" ]; then
-        echo "Skipping downloads for $TARGET_DIR ($CONFIG_FILE is empty or contains placeholder)"
-        continue
-    fi
-
-    mkdir -p "$TARGET_DIR"
-    IFS=',' read -ra MODEL_IDS <<< "$MODEL_IDS_STRING"
-
-    for MODEL_ID in "${MODEL_IDS[@]}"; do
-        echo "Downloading model: $MODEL_ID to $TARGET_DIR"
-        (cd "$TARGET_DIR" && download.py --model "$MODEL_ID") || {
-            echo "ERROR: Failed to download model $MODEL_ID to $TARGET_DIR, continuing with next model..."
-        }
-    done
-done
-
 # Workspace as main working directory
 echo "cd $NETWORK_VOLUME" >> ~/.bashrc
 echo "cd $NETWORK_VOLUME" >> ~/.bash_profile
 
-if [ ! -d "$NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-KJNodes" ]; then
-    cd $NETWORK_VOLUME/ComfyUI/custom_nodes
-    git clone https://github.com/kijai/ComfyUI-KJNodes.git
-else
-    echo "Updating KJ Nodes"
-    cd $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-KJNodes
-    git pull
-fi
 
-if [ ! -d "$NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper" ]; then
-    cd $NETWORK_VOLUME/ComfyUI/custom_nodes
-    git clone https://github.com/kijai/ComfyUI-WanVideoWrapper.git
-else
-    echo "Updating KJ Nodes"
-    cd $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper
-    git pull
-fi
-
-# Install dependencies
-pip install --no-cache-dir -r $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-KJNodes/requirements.txt
-pip install --no-cache-dir -r $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-WanVideoWrapper/requirements.txt
-pip install --no-cache-dir -r $NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-Impact-Pack/requirements.txt
-pip install scikit-image
-echo "Starting ComfyUI"
-touch "$FLAG_FILE"
-if [ -n "$FILM_PID" ]; then
-    wait $FILM_PID
-    echo "✅ film_net_fp32.pt download complete."
-fi
 mkdir -p "$NETWORK_VOLUME/${RUNPOD_POD_ID}"
 nohup bash -c "python3 \"$NETWORK_VOLUME\"/ComfyUI/main.py --listen 2>&1 | tee \"$NETWORK_VOLUME\"/comfyui_\"$RUNPOD_POD_ID\"_nohup.log" &
 COMFY_PID=$!
