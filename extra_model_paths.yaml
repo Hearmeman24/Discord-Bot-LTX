@@ -6,3 +6,4 @@ a111:
     diffusion_models: models/diffusion_models/
     loras: models/loras
     checkpoints: models/checkpoints
+    upscale_models: models/upscale_models
