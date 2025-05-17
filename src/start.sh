@@ -7,6 +7,10 @@ export LD_PRELOAD="${TCMALLOC}"
 set -eo pipefail
 set +u
 
+echo "🔧 Installing LTXVideo packages..."
+pip install -r /ComfyUI/custom_nodes/ComfyUI-LTXVideo/requirements.txt &
+LTX_PID=$!
+
 if [[ -z "$is_multi_gpu" || "$is_multi_gpu" != "false" ]]; then
 if [[ "${IS_DEV,,}" =~ ^(true|1|t|yes)$ ]]; then
     API_URL="https://comfyui-job-api-dev.fly.dev"  # Replace with your development API URL
@@ -102,6 +106,10 @@ if [ -f "$FLAG_FILE" ] || [ "$new_config" = "true" ]; then
   rm -rf "$NETWORK_VOLUME/ComfyUI/custom_nodes/ComfyUI-Manager" || echo "Remove operation failed, continuing..."
   sync_bot_repo
 
+  wait $LTX_PID
+  LTX_STATUS=$?
+  echo "✅ LTXNodes install complete"
+
   echo "▶️  Starting ComfyUI"
   # group both the main and fallback commands so they share the same log
   mkdir -p "$NETWORK_VOLUME/${RUNPOD_POD_ID}"
@@ -111,6 +119,11 @@ if [ -f "$FLAG_FILE" ] || [ "$new_config" = "true" ]; then
       echo "🔄  Still waiting…"
       sleep 2
   done
+
+  if [ $LTX_STATUS -ne 0 ]; then
+    echo "❌ LTXNodes install failed."
+    exit 1
+  fi
 
   echo "ComfyUI is UP Starting worker"
   nohup bash -c "python3 \"$REPO_DIR\"/worker.py 2>&1 | tee \"$NETWORK_VOLUME\"/\"$RUNPOD_POD_ID\"/worker.log" &
